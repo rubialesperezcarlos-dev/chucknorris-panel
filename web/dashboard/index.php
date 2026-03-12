@@ -208,25 +208,28 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
                 reportsMap = {};
                 if (!data.reports || data.reports.length === 0) {
                     list.innerHTML = '<p>No hay reportes.</p>';
-                    return;
+                } else {
+                    data.reports.forEach(r => {
+                        const tid = parseInt(r.task_id, 10);
+                        if (!reportsMap[tid]) reportsMap[tid] = [];
+                        reportsMap[tid].push(r);
+                    });
+                    list.innerHTML = '<table><thead><tr><th>ID</th><th>Task</th><th>Archivo</th><th>Tamaño</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>' +
+                        data.reports.map(r => {
+                            const isHtml = (r.filename || '').endsWith('.html');
+                            const viewLink = isHtml ? '<a href="download_report.php?id=' + r.id + '&token=' + downloadToken + '&view=1" target="_blank" style="margin-right:8px;">Ver</a>' : '';
+                            const dlLink = '<a href="download_report.php?id=' + r.id + '&token=' + downloadToken + '">Descargar</a>';
+                            const sizeKb = r.file_size ? (Math.round(parseInt(r.file_size)/1024) + ' KB') : '-';
+                            const icon = isHtml ? '📄 ' : '📝 ';
+                            return '<tr><td>' + r.id + '</td><td>' + r.task_id + '</td><td>' + icon + escapeHtml(r.filename) + '</td><td>' + sizeKb + '</td><td>' + (r.created_at || '') + '</td><td>' + viewLink + dlLink + '</td></tr>';
+                        }).join('') +
+                        '</tbody></table>';
                 }
-                data.reports.forEach(r => {
-                    const tid = parseInt(r.task_id, 10);
-                    if (!reportsMap[tid]) reportsMap[tid] = [];
-                    reportsMap[tid].push(r);
-                });
-                list.innerHTML = '<table><thead><tr><th>ID</th><th>Task</th><th>Archivo</th><th>Tamaño</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>' +
-                    data.reports.map(r => {
-                        const isHtml = (r.filename || '').endsWith('.html');
-                        const viewLink = isHtml ? '<a href="download_report.php?id=' + r.id + '&token=' + downloadToken + '&view=1" target="_blank" style="margin-right:8px;">Ver</a>' : '';
-                        const dlLink = '<a href="download_report.php?id=' + r.id + '&token=' + downloadToken + '">Descargar</a>';
-                        const sizeKb = r.file_size ? (Math.round(parseInt(r.file_size)/1024) + ' KB') : '-';
-                        const icon = isHtml ? '📄 ' : '📝 ';
-                        return '<tr><td>' + r.id + '</td><td>' + r.task_id + '</td><td>' + icon + escapeHtml(r.filename) + '</td><td>' + sizeKb + '</td><td>' + (r.created_at || '') + '</td><td>' + viewLink + dlLink + '</td></tr>';
-                    }).join('') +
-                    '</tbody></table>';
                 loadTasks();
-            }).catch(() => { document.getElementById('reportsList').innerHTML = '<p>Error al cargar reportes.</p>'; });
+            }).catch(() => {
+                document.getElementById('reportsList').innerHTML = '<p>Error al cargar reportes.</p>';
+                loadTasks();
+            });
         }
 
         // Live logs
