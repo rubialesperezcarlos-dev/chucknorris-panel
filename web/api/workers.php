@@ -83,7 +83,22 @@ function api_workers_heartbeat(): void {
         echo json_encode(['error' => 'Worker not found']);
         return;
     }
-    echo json_encode(['ok' => true]);
+
+    // Check restart flag
+    $restart = false;
+    try {
+        $r = $pdo->prepare('SELECT restart_requested FROM workers WHERE id = ?');
+        $r->execute([$worker_id]);
+        $row = $r->fetch();
+        if ($row && (int)($row['restart_requested'] ?? 0) === 1) {
+            $restart = true;
+            $pdo->prepare('UPDATE workers SET restart_requested = 0 WHERE id = ?')->execute([$worker_id]);
+        }
+    } catch (\Throwable $e) {
+        // Column may not exist yet
+    }
+
+    echo json_encode(['ok' => true, 'restart' => $restart]);
 }
 
 function api_workers_list(): void {
@@ -96,6 +111,38 @@ function api_workers_list(): void {
     $stmt = $pdo->query('SELECT id, uuid, hostname, ip_address, ram_total_mb, ram_used_mb, cpu_usage_percent, active_tasks, max_concurrent_tasks, status, last_heartbeat_at, registered_at FROM workers ORDER BY ram_total_mb DESC, active_tasks ASC');
     $workers = $stmt->fetchAll();
     echo json_encode(['workers' => $workers]);
+}
+
+/**
+ * Request a worker to restart. Sets restart_requested=1 in DB.
+ * Worker reads this flag on next heartbeat and exits (systemd restarts it).
+ */
+function api_workers_restart(): void {
+    requireAuth();
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $worker_id = (int)($input['worker_id'] ?? 0);
+    if ($worker_id <= 0) {
+        http_response_code(400);
+        echo json_encode(['error' => 'worker_id required']);
+        return;
+    }
+    $pdo = getDb();
+
+    // Ensure column exists
+    try {
+        $pdo->exec("ALTER TABLE workers ADD COLUMN restart_requested TINYINT NOT NULL DEFAULT 0");
+    } catch (\Throwable $e) {
+        // Column already exists
+    }
+
+    $stmt = $pdo->prepare('UPDATE workers SET restart_requested = 1, updated_at = NOW() WHERE id = ?');
+    $stmt->execute([$worker_id]);
+    if ($stmt->rowCount() === 0) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Worker not found']);
+        return;
+    }
+    echo json_encode(['ok' => true, 'worker_id' => $worker_id, 'message' => 'Restart requested, worker will restart on next heartbeat']);
 }
 
 /**

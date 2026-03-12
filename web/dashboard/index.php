@@ -134,11 +134,19 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
                         const pct = maxC > 0 ? Math.round((active / maxC) * 100) : 0;
                         const barColor = pct >= 90 ? 'var(--danger)' : pct >= 60 ? 'var(--warn)' : 'var(--success)';
                         const capacityHtml = '<div class="capacity-bar"><div class="capacity-fill" style="width:' + pct + '%;background:' + barColor + ';"></div></div>' + active + ' / ' + maxC;
-                        const configHtml = '<input type="number" min="1" max="20" value="' + maxC + '" id="wc_' + w.id + '" style="width:50px;"> <button class="btn-sm" onclick="setWorkerCapacity(' + w.id + ')">Aplicar</button>';
+                        const configHtml = '<input type="number" min="1" max="20" value="' + maxC + '" id="wc_' + w.id + '" style="width:50px;"> <button class="btn-sm" onclick="setWorkerCapacity(' + w.id + ')">Aplicar</button> <button class="btn-sm" style="background:var(--warn);" onclick="restartWorker(' + w.id + ',\'' + escapeHtml(w.hostname) + '\')">Reiniciar</button>';
                         return '<tr><td>' + escapeHtml(w.hostname) + '</td><td>' + (w.ram_used_mb || 0) + ' / ' + (w.ram_total_mb || 0) + ' MB</td><td>' + (w.cpu_usage_percent || 0) + '%</td><td>' + capacityHtml + '</td><td><span class="status ' + (w.status || 'offline') + '">' + (w.status || 'offline') + '</span></td><td>' + (w.last_heartbeat_at || '-') + '</td><td>' + configHtml + '</td></tr>';
                     }).join('') +
                     '</tbody></table>';
             }).catch(() => { document.getElementById('workersList').innerHTML = '<p>Error al cargar workers.</p>'; });
+        }
+
+        function restartWorker(workerId, hostname) {
+            if (!confirm('¿Reiniciar worker "' + hostname + '"? Se reiniciará en el próximo heartbeat (~30s). Las tareas en curso terminarán primero.')) return;
+            post('workers/restart', { worker_id: workerId }).then(data => {
+                if (data.error) alert(data.error);
+                else alert('Reinicio solicitado. El worker se reiniciará en ~30 segundos.');
+            }).catch(err => alert(err && err.error ? err.error : 'Error'));
         }
 
         function setWorkerCapacity(workerId) {
@@ -170,8 +178,9 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
                             if (htmlReport) {
                                 actions += '<a href="download_report.php?id=' + htmlReport.id + '&token=' + downloadToken + '&view=1" class="btn" target="_blank" style="background:#3fb950;">Ver Reporte</a> ';
                             }
-                            actions += '<a href="generate_report.php?task_id=' + t.id + '&token=' + downloadToken + '" class="btn" target="_blank" style="background:#30363d;">Raw</a>';
+                            actions += '<a href="generate_report.php?task_id=' + t.id + '&token=' + downloadToken + '" class="btn" target="_blank" style="background:#30363d;">Raw</a> ';
                         }
+                        actions += '<button class="btn" style="background:var(--danger);padding:6px 10px;font-size:12px;" onclick="deleteTask(' + t.id + ')">Eliminar</button>';
                         return '<tr><td>' + t.id + '</td><td>' + escapeHtml(t.target_url) + '</td><td><span class="status ' + (t.status || '') + '">' + (t.status || '') + '</span></td><td>' + (t.started_at || '—') + '</td><td title="Si running y esto no cambia hace varios minutos, puede estar colgado">' + lastLog + '</td><td>' + (t.completed_at || '—') + '</td><td>' + escapeHtml(t.worker_hostname || '-') + '</td><td>' + actions + '</td></tr>';
                     }).join('') +
                     '</tbody></table>';
@@ -184,6 +193,14 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
             const d = document.createElement('div');
             d.textContent = s;
             return d.innerHTML;
+        }
+
+        function deleteTask(taskId) {
+            if (!confirm('¿Eliminar tarea #' + taskId + '? Se borrarán logs, resultados y reportes asociados.')) return;
+            post('tasks/delete', { task_id: taskId }).then(data => {
+                if (data.error) alert(data.error);
+                else { loadReports(); }
+            }).catch(err => alert(err && err.error ? err.error : 'Error al eliminar'));
         }
 
         // Create task

@@ -303,6 +303,47 @@ function api_reports_upload(): void {
     echo json_encode(['ok' => true, 'report_id' => (int)$pdo->lastInsertId(), 'filename' => $filename]);
 }
 
+/**
+ * Delete a task and all its logs/results/reports (CASCADE).
+ * If running, also decrements worker active_tasks.
+ */
+function api_tasks_delete(): void {
+    requireAuth();
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $task_id = (int)($input['task_id'] ?? 0);
+    if ($task_id <= 0) {
+        http_response_code(400);
+        echo json_encode(['error' => 'task_id required']);
+        return;
+    }
+    $pdo = getDb();
+    $stmt = $pdo->prepare('SELECT id, status, worker_id FROM tasks WHERE id = ?');
+    $stmt->execute([$task_id]);
+    $task = $stmt->fetch();
+    if (!$task) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Task not found']);
+        return;
+    }
+
+    // If task was running/assigned, decrement worker active_tasks
+    if (in_array($task['status'], ['running', 'assigned']) && $task['worker_id']) {
+        $pdo->prepare('UPDATE workers SET active_tasks = GREATEST(0, active_tasks - 1) WHERE id = ?')->execute([$task['worker_id']]);
+    }
+
+    // Delete report files from disk
+    $files = $pdo->prepare('SELECT file_path FROM reports WHERE task_id = ?');
+    $files->execute([$task_id]);
+    while ($row = $files->fetch()) {
+        if (!empty($row['file_path']) && file_exists($row['file_path'])) {
+            @unlink($row['file_path']);
+        }
+    }
+
+    $pdo->prepare('DELETE FROM tasks WHERE id = ?')->execute([$task_id]);
+    echo json_encode(['ok' => true, 'deleted_task_id' => $task_id]);
+}
+
 function api_reports_list(): void {
     requireAuth();
     $task_id = (int)($_GET['task_id'] ?? 0);

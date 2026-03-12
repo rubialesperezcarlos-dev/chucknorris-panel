@@ -42,6 +42,8 @@ try {
             api_workers_list();
         } elseif ($sub === 'config' && $method === 'POST') {
             api_workers_config();
+        } elseif ($sub === 'restart' && $method === 'POST') {
+            api_workers_restart();
         } else {
             http_response_code(404);
             echo json_encode(['error' => 'Not found']);
@@ -68,6 +70,8 @@ try {
             api_tasks_logs_get();
         } elseif ($sub === 'results' && $action === 'upload' && $method === 'POST') {
             api_tasks_results_upload();
+        } elseif ($sub === 'delete' && $method === 'POST') {
+            api_tasks_delete();
         } else {
             http_response_code(404);
             echo json_encode(['error' => 'Not found']);
