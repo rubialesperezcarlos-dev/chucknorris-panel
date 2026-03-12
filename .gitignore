@@ -1,0 +1,21 @@
+# Environment & secrets
+.env
+*.env
+.env.*
+
+# PHP
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
