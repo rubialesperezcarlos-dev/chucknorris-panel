@@ -140,7 +140,16 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
                 list.innerHTML = '<table><thead><tr><th>ID</th><th>URL</th><th>Estado</th><th>Inicio</th><th>Último log</th><th>Fin</th><th>Worker</th><th>Acciones</th></tr></thead><tbody>' +
                     data.tasks.map(t => {
                         const lastLog = t.last_log_at || '—';
-                        return '<tr><td>' + t.id + '</td><td>' + escapeHtml(t.target_url) + '</td><td><span class="status ' + (t.status || '') + '">' + (t.status || '') + '</span></td><td>' + (t.started_at || '—') + '</td><td title="Si running y esto no cambia hace varios minutos, puede estar colgado">' + lastLog + '</td><td>' + (t.completed_at || '—') + '</td><td>' + escapeHtml(t.worker_hostname || '-') + '</td><td><button class="btn btn-log" data-id="' + t.id + '">Ver logs</button> ' + ((t.status === 'completed' || t.status === 'failed') ? '<a href="generate_report.php?task_id=' + t.id + '&token=' + downloadToken + '" class="btn" target="_blank">Reporte HTML</a>' : '') + '</td></tr>';
+                        let actions = '<button class="btn btn-log" data-id="' + t.id + '">Ver logs</button> ';
+                        if (t.status === 'completed' || t.status === 'failed') {
+                            const taskReports = reportsMap[t.id] || [];
+                            const htmlReport = taskReports.find(r => (r.filename || '').endsWith('.html'));
+                            if (htmlReport) {
+                                actions += '<a href="download_report.php?id=' + htmlReport.id + '&token=' + downloadToken + '&view=1" class="btn" target="_blank" style="background:#3fb950;">Ver Reporte</a> ';
+                            }
+                            actions += '<a href="generate_report.php?task_id=' + t.id + '&token=' + downloadToken + '" class="btn" target="_blank" style="background:#30363d;">Raw</a>';
+                        }
+                        return '<tr><td>' + t.id + '</td><td>' + escapeHtml(t.target_url) + '</td><td><span class="status ' + (t.status || '') + '">' + (t.status || '') + '</span></td><td>' + (t.started_at || '—') + '</td><td title="Si running y esto no cambia hace varios minutos, puede estar colgado">' + lastLog + '</td><td>' + (t.completed_at || '—') + '</td><td>' + escapeHtml(t.worker_hostname || '-') + '</td><td>' + actions + '</td></tr>';
                     }).join('') +
                     '</tbody></table>';
                 document.querySelectorAll('.btn-log').forEach(el => el.addEventListener('click', () => openLog(el.dataset.id)));
@@ -167,17 +176,33 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
             }).finally(() => { document.getElementById('btnCreate').disabled = false; });
         });
 
-        // Reports list: by task
+        // Reports list: by task — save for cross-referencing with tasks table
+        let reportsMap = {};
+
         function loadReports() {
             api('reports/list').then(data => {
                 const list = document.getElementById('reportsList');
+                reportsMap = {};
                 if (!data.reports || data.reports.length === 0) {
                     list.innerHTML = '<p>No hay reportes.</p>';
                     return;
                 }
-                list.innerHTML = '<table><thead><tr><th>ID</th><th>Task ID</th><th>Archivo</th><th>Fecha</th><th></th></tr></thead><tbody>' +
-                    data.reports.map(r => '<tr><td>' + r.id + '</td><td>' + r.task_id + '</td><td>' + escapeHtml(r.filename) + '</td><td>' + (r.created_at || '') + '</td><td><a href="download_report.php?id=' + r.id + '&token=' + downloadToken + '">Descargar</a></td></tr>').join('') +
+                data.reports.forEach(r => {
+                    const tid = parseInt(r.task_id, 10);
+                    if (!reportsMap[tid]) reportsMap[tid] = [];
+                    reportsMap[tid].push(r);
+                });
+                list.innerHTML = '<table><thead><tr><th>ID</th><th>Task</th><th>Archivo</th><th>Tamaño</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>' +
+                    data.reports.map(r => {
+                        const isHtml = (r.filename || '').endsWith('.html');
+                        const viewLink = isHtml ? '<a href="download_report.php?id=' + r.id + '&token=' + downloadToken + '&view=1" target="_blank" style="margin-right:8px;">Ver</a>' : '';
+                        const dlLink = '<a href="download_report.php?id=' + r.id + '&token=' + downloadToken + '">Descargar</a>';
+                        const sizeKb = r.file_size ? (Math.round(parseInt(r.file_size)/1024) + ' KB') : '-';
+                        const icon = isHtml ? '📄 ' : '📝 ';
+                        return '<tr><td>' + r.id + '</td><td>' + r.task_id + '</td><td>' + icon + escapeHtml(r.filename) + '</td><td>' + sizeKb + '</td><td>' + (r.created_at || '') + '</td><td>' + viewLink + dlLink + '</td></tr>';
+                    }).join('') +
                     '</tbody></table>';
+                loadTasks();
             }).catch(() => { document.getElementById('reportsList').innerHTML = '<p>Error al cargar reportes.</p>'; });
         }
 
@@ -296,12 +321,10 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
             document.getElementById('logPanel').style.display = 'none';
         });
 
-        // Refresh lists
+        // Refresh lists — reports first so reportsMap is ready when tasks render
         loadWorkers();
-        loadTasks();
         loadReports();
         setInterval(loadWorkers, 10000);
-        setInterval(loadTasks, 8000);
         setInterval(loadReports, 15000);
     </script>
 </body>
