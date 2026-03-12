@@ -40,6 +40,8 @@ try {
             api_workers_heartbeat();
         } elseif ($sub === 'list' && $method === 'GET') {
             api_workers_list();
+        } elseif ($sub === 'config' && $method === 'POST') {
+            api_workers_config();
         } else {
             http_response_code(404);
             echo json_encode(['error' => 'Not found']);

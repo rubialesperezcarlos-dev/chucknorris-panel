@@ -57,9 +57,8 @@ function api_tasks_list(): void {
 
 /**
  * Scheduler: asignar la siguiente tarea pendiente al worker que hace poll
- * si está libre (active_tasks == 0). Así varios workers en paralelo: cada uno
- * coge tareas mientras esté idle; antes solo el "mejor" por RAM podía recibir
- * y si estaba ocupado run_task bloqueaba el poll → pending eterno.
+ * si tiene capacidad (active_tasks < max_concurrent_tasks).
+ * Workers con 128GB RAM y GPU pueden correr 5+ tareas en paralelo.
  */
 function api_tasks_poll(): void {
     requireAuth();
@@ -72,7 +71,7 @@ function api_tasks_poll(): void {
     }
 
     $pdo = getDb();
-    $stmt = $pdo->prepare('SELECT id, active_tasks, status FROM workers WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, active_tasks, max_concurrent_tasks, status FROM workers WHERE id = ?');
     $stmt->execute([$worker_id]);
     $workerRow = $stmt->fetch();
     if (!$workerRow) {
@@ -80,8 +79,12 @@ function api_tasks_poll(): void {
         echo json_encode(['error' => 'Worker not found']);
         return;
     }
-    // Solo online y sin tarea activa: si está en run_task no puede aceptar otra
-    if (($workerRow['status'] ?? '') !== 'online' || (int)($workerRow['active_tasks'] ?? 0) > 0) {
+
+    $active = (int)($workerRow['active_tasks'] ?? 0);
+    $maxConcurrent = (int)($workerRow['max_concurrent_tasks'] ?? 1);
+    if ($maxConcurrent < 1) $maxConcurrent = 1;
+
+    if (($workerRow['status'] ?? '') !== 'online' || $active >= $maxConcurrent) {
         echo json_encode(['task' => null]);
         return;
     }

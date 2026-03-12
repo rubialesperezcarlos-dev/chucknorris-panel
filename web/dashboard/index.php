@@ -35,10 +35,14 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
         table { width: 100%; border-collapse: collapse; }
         th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
         th { color: #8b949e; font-weight: 600; }
-        button, .btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+        button, .btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-block; text-decoration: none; }
         button:hover, .btn:hover { opacity: 0.9; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         input[type="url"], input[type="text"] { width: 100%; max-width: 500px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+        input[type="number"] { width: 60px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); text-align: center; font-size: 14px; }
+        .capacity-bar { display: inline-block; width: 80px; height: 18px; background: #21262d; border-radius: 9px; overflow: hidden; vertical-align: middle; margin-right: 8px; }
+        .capacity-fill { height: 100%; border-radius: 9px; transition: width 0.3s; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 4px; }
         .status { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
         .status.online { background: rgba(63,185,80,0.2); color: var(--success); }
         .status.offline { background: rgba(248,81,73,0.2); color: var(--danger); }
@@ -67,7 +71,7 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
                 <input type="url" id="targetUrl" placeholder="https://ejemplo.com" />
                 <button id="btnCreate">Iniciar escaneo</button>
             </div>
-            <p style="color:#8b949e; font-size: 13px; margin-top: 8px;">Se asignará al worker con más RAM disponible (32GB prioritario).</p>
+            <p style="color:#8b949e; font-size: 13px; margin-top: 8px;">Se asignarán a workers con capacidad disponible. Cada worker puede ejecutar múltiples tareas en paralelo.</p>
             <p style="color:#8b949e; font-size: 12px; margin-top: 12px; border-left: 3px solid var(--warn); padding-left: 10px;">
                 <strong>¿Terminó o está colgado?</strong> En la tabla mira <em>Último log</em> y <em>Fin</em>: si sigue <span class="status running">running</span> y el último log no cambia &gt;5–10 min, en el servidor ejecuta <code>docker ps</code> (¿sigue el contenedor?) y <code>docker logs &lt;id&gt; --tail 50</code>. Cuando acaba, estado → <span class="status completed">completed</span>/<span class="status failed">failed</span> y <em>Fin</em> tiene fecha.
                 Cuando acaba, el estado pasa a <span class="status completed">completed</span> o <span class="status failed">failed</span> y aparece el enlace de reporte.
@@ -123,10 +127,29 @@ $downloadToken = defined('DASHBOARD_API_KEY') ? hash('sha256', DASHBOARD_API_KEY
                     list.innerHTML = '<p>No hay workers registrados.</p>';
                     return;
                 }
-                list.innerHTML = '<table><thead><tr><th>Host</th><th>RAM</th><th>CPU</th><th>Tareas</th><th>Estado</th><th>Último heartbeat</th></tr></thead><tbody>' +
-                    data.workers.map(w => '<tr><td>' + escapeHtml(w.hostname) + '</td><td>' + (w.ram_used_mb || 0) + ' / ' + (w.ram_total_mb || 0) + ' MB</td><td>' + (w.cpu_usage_percent || 0) + '%</td><td>' + (w.active_tasks || 0) + '</td><td><span class="status ' + (w.status || 'offline') + '">' + (w.status || 'offline') + '</span></td><td>' + (w.last_heartbeat_at || '-') + '</td></tr>').join('') +
+                list.innerHTML = '<table><thead><tr><th>Host</th><th>RAM</th><th>CPU</th><th>Capacidad</th><th>Estado</th><th>Último heartbeat</th><th>Config</th></tr></thead><tbody>' +
+                    data.workers.map(w => {
+                        const active = parseInt(w.active_tasks || 0);
+                        const maxC = parseInt(w.max_concurrent_tasks || 1);
+                        const pct = maxC > 0 ? Math.round((active / maxC) * 100) : 0;
+                        const barColor = pct >= 90 ? 'var(--danger)' : pct >= 60 ? 'var(--warn)' : 'var(--success)';
+                        const capacityHtml = '<div class="capacity-bar"><div class="capacity-fill" style="width:' + pct + '%;background:' + barColor + ';"></div></div>' + active + ' / ' + maxC;
+                        const configHtml = '<input type="number" min="1" max="20" value="' + maxC + '" id="wc_' + w.id + '" style="width:50px;"> <button class="btn-sm" onclick="setWorkerCapacity(' + w.id + ')">Aplicar</button>';
+                        return '<tr><td>' + escapeHtml(w.hostname) + '</td><td>' + (w.ram_used_mb || 0) + ' / ' + (w.ram_total_mb || 0) + ' MB</td><td>' + (w.cpu_usage_percent || 0) + '%</td><td>' + capacityHtml + '</td><td><span class="status ' + (w.status || 'offline') + '">' + (w.status || 'offline') + '</span></td><td>' + (w.last_heartbeat_at || '-') + '</td><td>' + configHtml + '</td></tr>';
+                    }).join('') +
                     '</tbody></table>';
             }).catch(() => { document.getElementById('workersList').innerHTML = '<p>Error al cargar workers.</p>'; });
+        }
+
+        function setWorkerCapacity(workerId) {
+            const input = document.getElementById('wc_' + workerId);
+            if (!input) return;
+            const val = parseInt(input.value, 10);
+            if (isNaN(val) || val < 1 || val > 20) return alert('Valor entre 1 y 20');
+            post('workers/config', { worker_id: workerId, max_concurrent_tasks: val }).then(data => {
+                if (data.error) alert(data.error);
+                else loadWorkers();
+            }).catch(err => alert(err && err.error ? err.error : 'Error'));
         }
 
         // Tasks
